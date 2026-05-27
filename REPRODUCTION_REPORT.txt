@@ -1,0 +1,47 @@
+======================================================================
+ValHaLA — Reproduction & Correspondence Report
+======================================================================
+Frozen solver:  valhala_solver_standalone.py
+  MD5: 846ce6aae16623c6ca4a551f86df869c   (UNCHANGED; locked)
+
+Three checks, all passing and order-independent:
+
+1. reproduce_paper.py ............ 24 / 24 headline quantities
+2. validation_battery.py ......... 6 PASS / 3 THRESHOLD / 1 DUAL (Table 3)
+3. verify_figures_tables.py ...... 22 / 22 figure & table values
+
+Exact correspondence verified against the manuscript:
+
+  TABLE 3  validation verdicts ......... 6 / 3 / 1
+  TABLE 4  Chopin Op.10/1 fingering .... 1-2-4-1-2-4-1-2-4-1-3-5
+           agreement Paderewski/Cortot . 12/12, Henle 11/12
+  FIG 1    demo1 8-term decomposition + Baroque>Modern ARI
+  FIG 2    demo2 raw peak ARI .......... 45.5 (small) / 38.6 (large)
+  FIG 3    demo6 crossover phi ......... 0.130 -> 0.043
+  FIG 4    demo4 tempo (Adagio=Allegro, Presto departs)
+  FIG 5    demo5 dry/moist ............. 27.42 / 24.10, ToB 2/4, -12.1%
+  FIG 6    scaling exponents ........... 1.90 1.89 1.88 1.71 1.65 1.49 1.46 1.39
+
+----------------------------------------------------------------------
+TWO STATE-LEAKAGE BUGS FOUND AND FIXED (figure/validation code only;
+the frozen solver was never modified, MD5 unchanged):
+
+(1) run_demonstrations.py, run_demo6 (crossover): mutated the shared
+    module-level Modern tradition object in place, corrupting the Modern
+    scaling exponent for any demo run afterward (1.49 clean -> 1.24
+    after crossover).  Origin of the original Fig. 6 legend error.
+    Fixed by deep-copying the tradition before mutation.
+
+(2) validation_battery.py, arm-weight test: mutated the shared Russian
+    tradition object in place, shifting the Russian scaling exponent
+    (1.71 -> 1.72) if the battery was run before the figures in the
+    same session.  Fixed by deep-copying the tradition before mutation.
+
+Both figures now also use raw Action-Risk Index values (matching the
+captions, which quote raw ARI) and a 1-based "Note position in passage"
+axis, consistent with the manuscript.
+
+File MD5s after fixes:
+576cd58dd3fe9eef041a33a9137948fc  run_demonstrations.py
+6db53ea72b885bf980edece67fed83f1  validation_battery.py
+======================================================================

@@ -107,7 +107,7 @@ def run_demo1():
         r = solver.solve(notes)
         results[trad] = {
             'fingers': r.fingers, 'cost': r.total_cost,
-            'ari': normalize_ari(r.ari_values),
+            'ari': list(r.ari_values),
             'breakdown': r.cost_breakdown,
         }
     return results, midis
@@ -124,7 +124,7 @@ def run_demo2():
         r = solver.solve(notes)
         results[label] = {
             'fingers': r.fingers, 'cost': r.total_cost,
-            'ari': normalize_ari(r.ari_values),
+            'ari': list(r.ari_values),
         }
     return results, midis
 
@@ -139,7 +139,7 @@ def run_demo3():
         r = solver.solve(notes)
         results[trad] = {
             'fingers': r.fingers, 'cost': r.total_cost,
-            'ari': normalize_ari(r.ari_values),
+            'ari': list(r.ari_values),
             'breakdown': r.cost_breakdown,
         }
     return results, midis
@@ -156,7 +156,7 @@ def run_demo4():
         results[label] = {
             'fingers': r.fingers, 'cost': r.total_cost,
             'tempo': nps,
-            'ari': normalize_ari(r.ari_values),
+            'ari': list(r.ari_values),
         }
     return results, midis
 
@@ -174,12 +174,13 @@ def run_demo5():
         results[label] = {
             'fingers': r.fingers, 'cost': r.total_cost,
             'mu_f': mu, 'thumb_on_black': tob,
-            'ari': normalize_ari(r.ari_values),
+            'ari': list(r.ari_values),
         }
     return results, midis
 
 
 def run_demo6():
+    import copy
     midis = passage_bach_invention_13()
     mu_values = np.linspace(0.0, 2.5, 51)
     phi_values = []
@@ -187,6 +188,11 @@ def run_demo6():
     for mu in mu_values:
         cfg = SolverConfig(tradition='modern', tempo_nps=6.0)
         solver = HamiltonianSolver(config=cfg)
+        # Deep-copy the tradition before mutating: the solver binds to the
+        # shared module-level TRADITIONS object by reference, so mutating it
+        # in place would corrupt the Modern tradition for every later demo
+        # (this was the source of the original Fig. 6 Modern-alpha error).
+        solver.tradition = copy.deepcopy(solver.tradition)
         solver.tradition.thumb_under = 3 + mu * 4
         solver.tradition.thumb_on_black = 2 + mu * 20
         solver.tradition.metric_weight = mu
@@ -236,9 +242,10 @@ def fig_demo1(results, midis):
     plt = setup_matplotlib()
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(DOUBLE_COL, 2.5))
 
-    terms = ['topographic', 'coupling', 'tradition', 'adhesion',
-             'gravity', 'kinetic', 'key_action']
-    term_labels = ['Topo', 'Coupl', 'Trad', 'Adhes', 'Grav', 'Kin', 'Key']
+    terms = ['kinetic', 'topographic', 'gravity', 'coupling',
+             'key_action', 'tradition', 'phrase', 'arpeggio']
+    term_labels = ['Kin', 'Topo', 'Grav', 'Coupl', 'Key', 'Trad',
+                   'Phrase', 'Arp']
     x = np.arange(len(terms))
     w = 0.35
     for i, (trad, color) in enumerate([('baroque', COLORS['baroque']),
@@ -253,13 +260,13 @@ def fig_demo1(results, midis):
     ax1.legend(frameon=False)
     ax1.axhline(0, color='gray', linewidth=0.5)
 
-    xn = range(len(results['baroque']['ari']))
     for trad, color, ls in [('baroque', COLORS['baroque'], '-'),
                              ('modern', COLORS['modern'], '--')]:
         ari = results[trad]['ari']
-        ax2.plot(range(len(ari)), ari, color=color, linestyle=ls,
+        xs = range(1, len(ari) + 1)
+        ax2.plot(xs, ari, color=color, linestyle=ls,
                  label=trad.capitalize(), marker='.', markersize=3)
-    ax2.set_xlabel('Note index')
+    ax2.set_xlabel('Note position in passage')
     ax2.set_ylabel('Action-Risk Index')
     ax2.set_title('(b) ARI profile')
     ax2.legend(frameon=False)
@@ -276,11 +283,11 @@ def fig_demo2(results, midis):
     for label, color, ls, mk in [('large', 'b', '-', 'o'),
                                   ('small', 'r', '--', 's')]:
         ari = results[label]['ari']
-        ax.plot(range(len(ari)), ari, color=color, linestyle=ls,
+        ax.plot(range(1, len(ari) + 1), ari, color=color, linestyle=ls,
                 label=f'{label.capitalize()} '
                       f'({"210" if label=="large" else "170"} mm)',
                 marker=mk, markersize=3)
-    ax.set_xlabel('Note index')
+    ax.set_xlabel('Note position in passage')
     ax.set_ylabel('Action-Risk Index')
     ax.legend(frameon=False)
     plt.tight_layout()
@@ -316,7 +323,7 @@ def fig_demo3(results, midis):
     ax2.plot(range(len(results['french']['ari'])),
              results['french']['ari'], color=COLORS['french'],
              label='French-Cortot', marker='.', markersize=3, linestyle='--')
-    ax2.set_xlabel('Note index')
+    ax2.set_xlabel('Note position in passage')
     ax2.set_ylabel('Action-Risk Index')
     ax2.set_title('(b) ARI profile')
     ax2.legend(frameon=False)
@@ -335,7 +342,7 @@ def fig_demo4(results, midis):
     for i, (label, c) in enumerate(zip(['adagio', 'allegro', 'presto'],
                                         colors_t)):
         fingers = results[label]['fingers']
-        ax1.plot(range(len(fingers)), fingers, marker='o', markersize=3,
+        ax1.plot(range(1, len(fingers) + 1), fingers, marker='o', markersize=3,
                  color=c,
                  label=f"{label.capitalize()} ({results[label]['tempo']:.0f} n/s)")
     ax1.set_ylabel('Finger')
@@ -345,9 +352,9 @@ def fig_demo4(results, midis):
 
     for label, c in zip(['adagio', 'allegro', 'presto'], colors_t):
         ari = results[label]['ari']
-        ax2.plot(range(len(ari)), ari,
+        ax2.plot(range(1, len(ari) + 1), ari,
                  marker='.', markersize=2, color=c, label=label.capitalize())
-    ax2.set_xlabel('Note index')
+    ax2.set_xlabel('Note position in passage')
     ax2.set_ylabel('Action-Risk Index')
     ax2.set_title('(b) ARI profiles')
     ax2.legend(frameon=False, fontsize=7)
@@ -362,15 +369,20 @@ def fig_demo5(results, midis):
     plt = setup_matplotlib()
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(DOUBLE_COL, 2.5))
 
+    n = len(results['dry']['fingers'])
     for label, color, ls in [('dry', '#CD853F', '-'), ('moist', '#4682B4', '--')]:
         fingers = results[label]['fingers']
-        ax1.plot(range(len(fingers)), fingers,
+        ax1.plot(range(1, len(fingers) + 1), fingers,
                  color=color, linestyle=ls, marker='o', markersize=3,
                  label=f"{label.capitalize()} "
                        f"($\\mu_f$={results[label]['mu_f']})")
     for i, m in enumerate(midis):
         if m % 12 in {1, 3, 6, 8, 10}:
-            ax1.axvspan(i - 0.3, i + 0.3, color='gray', alpha=0.15)
+            ax1.axvspan(i + 0.7, i + 1.3, color='gray', alpha=0.15)
+    # Left-justify (a): clip the axis to the data so the rightmost gray
+    # band cannot extend into panel (b)'s y-axis label.
+    ax1.set_xlim(0.5, n + 0.5)
+    ax1.set_xlabel('Note position in passage')
     ax1.set_ylabel('Finger')
     ax1.set_yticks([1, 2, 3, 4, 5])
     ax1.set_title('(a) Fingering (gray = black key)')
@@ -383,9 +395,12 @@ def fig_demo5(results, midis):
             width=0.5, edgecolor='black', linewidth=0.5)
     ax2.set_xticks([0, 1])
     ax2.set_xticklabels([f"Dry\n(ToB={tob[0]})", f"Moist\n(ToB={tob[1]})"])
+    # Center the two bars on their tick marks.
+    ax2.set_xlim(-0.5, 1.5)
     ax2.set_ylabel('Total action $J$')
     ax2.set_title('(b) Total cost')
 
+    fig.subplots_adjust(wspace=0.35)
     plt.tight_layout()
     fig.savefig('demo5_adhesion.pdf')
     plt.close(fig)
@@ -482,7 +497,7 @@ def fig_stochastic(data, midis):
     ax2.set_yticks(range(5))
     ax2.set_yticklabels(['1', '2', '3', '4', '5'])
     ax2.set_ylabel('Finger')
-    ax2.set_xlabel('Note index')
+    ax2.set_xlabel('Note position in passage')
     ax2.set_title('(b) Finger probability distribution')
     for i, f in enumerate(det_fingers):
         if i < N:

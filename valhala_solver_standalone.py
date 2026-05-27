@@ -76,6 +76,14 @@ SEQUENTIAL_REWARD = -3.0
 COUPLING_SUPPRESSION = 0.85
 TERMINAL_MULTIPLIER = 4.0
 
+# Black-key depth stagger (Eq. 5) and forearm rotation (Eq. 4)
+DEPTH_STAGGER_DZ = 12.7         # mm, black-white elevation difference (Table 5)
+ALPHA_BLACK_KEY = 2.0           # black-key stagger scale (Table 5)
+ALPHA_ROTATION = 1.5            # forearm rotation scale (Table 5)
+OMEGA_MAX = 1.2                 # rad, max comfortable forearm rotation (Table 5)
+ARPEGGIO_GROUPING = 1.0         # scale on the arpeggio-grouping mechanism (v2.1);
+                                # set to 0 to ablate grouping (validation/repro)
+
 # Black key MIDI pitch classes (C#, D#, F#, G#, A#)
 BLACK_KEYS = {1, 3, 6, 8, 10}
 
@@ -183,6 +191,19 @@ class HandModel:
         """Maximum reach between two fingers (0-indexed), mm."""
         pair = (min(f1, f2), max(f1, f2))
         return self.max_spans.get(pair, self.max_span * 0.5)
+
+    def finger_length_mm(self, finger_idx):
+        """Total extended length of a finger (0-indexed), mm.
+
+        Sum of the three Buchholz-derived phalange segments
+        (proximal + middle + distal).  This is the same anthropometry
+        that drives the kinetic and topographic terms, so the
+        stagger and rotation terms inherit personalization from
+        (H, B) without introducing new parameters.
+        """
+        return (self.pp_lengths[finger_idx] +
+                self.ip_lengths[finger_idx] +
+                self.dp_lengths[finger_idx])
 
 
 # =====================================================================
@@ -394,6 +415,15 @@ class SolverConfig:
     alpha_key: float = 0.4
     alpha_contact: float = 1.0
     alpha_collision: float = 5.0
+    # Optional, off-by-default variant (paper Sec. 7, arm-weight analysis).
+    # When False (default), the gravitational/arm-weight term is the
+    # faithful per-finger channeling cost, which governs action MAGNITUDE
+    # (and hence the scaling exponents) but not fingering SELECTION. When
+    # True, an additional weight-channeling reward couples finger strength
+    # to metrically strong notes, converting arm weight into a fingering-
+    # selection effect. Both behaviors are reproducible; the variant is
+    # provided for analysis and is not part of the default solver.
+    arm_weight_selection: bool = False
     # Stochastic
     stochastic_sigma: float = 0.15
     stochastic_trials: int = 100
@@ -657,6 +687,167 @@ class HamiltonianSolver:
         return self.cfg.alpha_dissipation * JOINT_VISCOSITY * v**2
 
     # -----------------------------------------------------------------
+    # Term 13: Forearm rotation (Eq. 4)
+    # -----------------------------------------------------------------
+    def _rotation_cost(self, midi1, midi2, finger1, finger2):
+        """Forearm rotation cost (Eq. 4, fingering-dependent form).
+
+            C_rot = alpha_rot * (delta_omega)^2,   |delta_omega| > 0.5 omega_max
+
+        The Taubman school (Golandsky 2001; Kochevitsky 1967) holds that
+        forearm rotation, not isolated finger motion, transfers weight
+        between keys, and that motion is organized around the *playing
+        unit* whose rotational axis runs through the centre of the hand
+        (functionally the middle finger).  The angular displacement
+        required by a transition therefore depends not only on the
+        lateral key distance but on *which finger* must arrive over the
+        target: bringing an ulnar- or radial-extreme finger (thumb or
+        little) over a distant key counter-rotates the playing unit more
+        than bringing the central finger, which is already aligned with
+        the rotational axis.
+
+        We model delta_omega as the lateral key displacement mapped
+        through the forearm lever, scaled by the arriving finger's
+        offset from the rotational axis.  That offset is taken from the
+        same inter-finger span geometry used elsewhere: the lateral
+        distance from the middle finger (the axis) to the arriving
+        finger, normalized by the hand's maximum span.  No new constant
+        is introduced; omega_max, alpha_rot, the lever, and the spans
+        already exist in the model.
+        """
+        dx_mm = abs(self.keyboard.key_distance(midi1, midi2))
+        # Effective forearm-to-fingertip radius (~270 mm; Tubiana 1996).
+        lever_mm = 270.0
+
+        # Arriving finger's lateral offset from the forearm rotational
+        # axis (the middle finger, index 2), as a fraction of the hand's
+        # maximum span.  Fingers aligned with the axis recruit little
+        # rotation; extreme fingers recruit proportionally more.
+        AXIS = 2  # middle finger, 0-indexed
+        arriving = finger2 - 1
+        if arriving == AXIS:
+            axis_offset_mm = 0.0
+        else:
+            axis_offset_mm = self.hand.finger_reach_mm(AXIS, arriving)
+        alignment = 1.0 + axis_offset_mm / self.hand.max_span
+
+        delta_omega = (dx_mm / lever_mm) * alignment
+        gate = 0.5 * OMEGA_MAX
+        if abs(delta_omega) > gate:
+            excess = abs(delta_omega) - gate
+            return ALPHA_ROTATION * excess**2
+        return 0.0
+        # Effective forearm-to-fingertip radius (~270 mm; Tubiana 1996).
+        # With omega_max = 1.2 rad, the gate 0.5*omega_max corresponds to
+        # an octave-scale lateral span, matching Sec. 2.10's description of
+        # rotation as consequential for large, alignment-breaking moves.
+        lever_mm = 270.0
+        delta_omega = dx_mm / lever_mm
+        gate = 0.5 * OMEGA_MAX
+        if abs(delta_omega) > gate:
+            excess = abs(delta_omega) - gate
+            return ALPHA_ROTATION * excess**2
+        return 0.0
+
+    def _arm_weight_selection_cost(self, note2, finger2):
+        """Optional weight-channeling SELECTION term (off by default).
+
+        The faithful gravity term :meth:`_gravity_cost` depends only on the
+        single finger and the tradition's arm-weight coefficient, which
+        rescales every candidate fingering's gravitational cost uniformly;
+        it therefore governs action magnitude but cannot reorder
+        fingerings.  The arm-weight schools (Russian, Taubman), however,
+        deliberately place *strong* fingers on tonally weighted notes so
+        that forearm weight is transmitted through a finger able to bear
+        it.  This optional term encodes that selection effect: on a
+        metrically strong note, a stronger finger earns a channeling
+        reward proportional to the tradition's arm-weight coefficient.
+
+        It reuses the strength index of :meth:`_gravity_cost` and the
+        existing ``beat_position`` metrical signal; no new constants are
+        introduced.  Enabled only when ``cfg.arm_weight_selection`` is
+        True, so the default solver is unaffected.
+        """
+        alpha_arm = self.tradition.arm_weight
+        if alpha_arm <= 0.0:
+            return 0.0
+        # Strong metrical position only (downbeat).
+        if getattr(note2, "beat_position", None) != 0:
+            return 0.0
+        strength = {1: 1.0, 2: 0.85, 3: 0.75, 4: 0.55, 5: 0.45}
+        # Reward (negative cost) for channeling weight through a strong
+        # finger on the weighted note; scaled by the same alpha_gravity and
+        # arm-weight coefficient that drive the faithful term.
+        return -self.cfg.alpha_gravity * alpha_arm * strength[finger2] * 3.0
+
+    def _stagger_cost(self, midi1, midi2, finger1, finger2):
+        """Black-key depth-stagger cost (Eq. 5, fingering-dependent form).
+
+        The black keys sit ``DEPTH_STAGGER_DZ`` (12.7 mm) above the
+        white-key surface.  Section 2.11 states that a colour change
+        forces "an asymmetric *hand configuration*": the cost is
+        therefore not a property of the note pair alone but of the
+        *finger pair* that must bridge the elevation difference.  Two
+        kinematic factors, both derived from the Buchholz hand model,
+        govern how costly that bridge is:
+
+          1. Span utilization.  A finger pair already near its maximum
+             inter-finger reach has little postural slack to absorb a
+             12.7 mm vertical offset; the same ``stretch`` ratio used by
+             the topographic term measures this.
+
+          2. Length mismatch.  When the *shorter* finger must take the
+             elevated (black) key while the *longer* finger rests on the
+             lower (white) key, the hand is forced into a more strained,
+             asymmetric posture than when the naturally longer finger
+             takes the higher key.  The signed length difference between
+             the two fingers, normalized by hand length, captures this.
+
+        The term reduces to zero within a colour (no elevation change)
+        and is symmetric in neither the fingers nor the direction of the
+        colour change, so it discriminates between candidate fingerings
+        and enters the optimization rather than adding a path constant.
+
+            C_stagger = alpha_bk * (|dz|/dz0) * stretch * lambda(f_i,f_j)
+
+        with lambda the kinematic length-mismatch factor below.  No new
+        constants are introduced: alpha_bk, dz0 = DEPTH_STAGGER_DZ, the
+        reach, and the segment lengths are all already in the model.
+        """
+        b1 = self.keyboard.is_black(midi1)
+        b2 = self.keyboard.is_black(midi2)
+        if b1 == b2:
+            return 0.0
+
+        f1_idx, f2_idx = finger1 - 1, finger2 - 1
+
+        # (1) Span utilization: how close the pair is to its max reach.
+        d_mm = self.keyboard.key_distance(midi1, midi2)
+        reach = self.hand.finger_reach_mm(f1_idx, f2_idx)
+        stretch = d_mm / reach if reach > 0 else 1.0
+
+        # (2) Length mismatch: the finger landing on the BLACK (elevated)
+        # key versus the finger on the white key.  Strain is higher when
+        # the shorter finger must reach up to the black key.
+        black_idx = f2_idx if b2 else f1_idx       # finger on the black key
+        white_idx = f1_idx if b2 else f2_idx       # finger on the white key
+        len_black = self.hand.finger_length_mm(black_idx)
+        len_white = self.hand.finger_length_mm(white_idx)
+        # Normalize the signed length difference by the hand's own natural
+        # length scale -- the spread between its longest and shortest
+        # finger -- so the factor needs no chosen multiplier.  The deficit
+        # is +1 in the most strained case (shortest finger on the black
+        # key while the longest sits on the white key) and -1 in the most
+        # relieved case; lambda is then the non-negative neutral-centered
+        # factor 1 + deficit, spanning [0, 2].
+        all_len = [self.hand.finger_length_mm(k) for k in range(5)]
+        len_range = max(all_len) - min(all_len)
+        deficit = (len_white - len_black) / len_range if len_range > 0 else 0.0
+        lam = max(0.0, 1.0 + deficit)
+
+        return ALPHA_BLACK_KEY * stretch * lam
+
+    # -----------------------------------------------------------------
     # Term 11: Pedagogical tradition
     # -----------------------------------------------------------------
     def _tradition_cost(self, midi1, midi2, finger1, finger2, stepwise):
@@ -772,6 +963,16 @@ class HamiltonianSolver:
         cost += self._tradition_cost(midi1, midi2, finger1, finger2,
                                      stepwise)
 
+        # 12. Forearm rotation (standalone biomechanical term, Eq. 4)
+        cost += self._rotation_cost(midi1, midi2, finger1, finger2)
+
+        # 13. Black-key depth stagger (Eq. 5)
+        cost += self._stagger_cost(midi1, midi2, finger1, finger2)
+
+        # Optional (off by default): arm-weight selection variant.
+        if self.cfg.arm_weight_selection:
+            cost += self._arm_weight_selection_cost(note2, finger2)
+
         # Phrase structure: sequential finger reward
         # Only when finger direction matches pitch direction
         # (ascending pitch → ascending finger number, or vice versa)
@@ -793,28 +994,28 @@ class HamiltonianSolver:
         # On non-stepwise motion (interval > 2 semitones), apply three
         # mechanisms that steer the solver toward sequential finger groups
         # (1-2-3-5 or 1-2-4-5) instead of 1-3 alternation.
-        if not stepwise and interval > 2:
+        if not stepwise and interval > 2 and ARPEGGIO_GROUPING != 0.0:
             ascending_p = midi2 > midi1
             # (a) Sequential finger reward on arpeggios:
             #     f_{i+1} = f_i + 1 on ascending is biomechanically
             #     efficient (no repositioning required within group)
             if ascending_p and finger2 == finger1 + 1 and finger2 <= 5:
-                cost -= 4.5
+                cost -= 4.5 * ARPEGGIO_GROUPING
             elif not ascending_p and finger2 == finger1 - 1 and finger2 >= 1:
-                cost -= 4.5
+                cost -= 4.5 * ARPEGGIO_GROUPING
 
             # (b) Finger gap penalty: skipping 2+ fingers within a group
             #     requires hand reconfiguration that is costlier than
             #     sequential depression (exclude thumb crossings)
             finger_gap = abs(finger2 - finger1)
             if finger_gap > 2 and finger1 != 1 and finger2 != 1:
-                cost += 3.0 * (finger_gap - 1)
+                cost += 3.0 * (finger_gap - 1) * ARPEGGIO_GROUPING
 
             # (c) Premature group restart penalty: returning to thumb
             #     before reaching finger 4+ means restarting the group
             #     earlier than necessary, wasting a position
             if ascending_p and finger1 > 1 and finger2 == 1 and finger1 < 4:
-                cost += 6.0
+                cost += 6.0 * ARPEGGIO_GROUPING
 
         # --- v2.1 Patch 1: Cost floor ---
         # Rewards (legato, sequential, rotation, arm-weight, natural-position)
@@ -1033,6 +1234,7 @@ class HamiltonianSolver:
             'collision': 0, 'coupling': 0, 'key_action': 0,
             'contact': 0, 'adhesion': 0, 'tempo': 0,
             'dissipation': 0, 'tradition': 0, 'phrase': 0,
+            'rotation': 0, 'stagger': 0,
             'arpeggio': 0, 'floor_clipped': 0,
         }
         for i in range(1, len(notes)):
@@ -1054,6 +1256,8 @@ class HamiltonianSolver:
             terms['dissipation'] += self._dissipation_cost(m1, m2, dt)
             terms['tradition'] += self._tradition_cost(m1, m2, f1, f2,
                                                        stepwise)
+            terms['rotation'] += self._rotation_cost(m1, m2, f1, f2)
+            terms['stagger'] += self._stagger_cost(m1, m2, f1, f2)
             if stepwise and abs(f2 - f1) == 1:
                 ascending_p = m2 > m1
                 ascending_f = f2 > f1

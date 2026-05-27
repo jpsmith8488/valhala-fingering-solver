@@ -1,100 +1,125 @@
+# ValHaLA and SCALE
+
+This repository hosts the code for two related projects in the
+mathematical modeling of piano performance:
+
+- **ValHaLA** (repository root) --- a variational solver for optimal
+  piano fingering. See below.
+- **SCALE** (the [`scale/`](scale/) directory) --- analysis code, a
+  validation script, and the complete Well-Tempered Clavier cost data
+  (both books, with per-term cost decomposition) accompanying a separate
+  manuscript. See [`scale/`](scale/) for its own documentation.
+
+---
+
 # ValHaLA: Variational Hamiltonian Least Action Solver for Piano Fingering
 
-**Supplementary Material** for the accompanying manuscript submitted to
-the *Journal of New Music Research*.
+A self-contained solver that assigns optimal piano fingerings by
+minimizing a fourteen-term physical cost function over the keyboard
+state space, using dynamic programming. It accompanies the manuscript
+
+> J. P. Smith, *Optimal Piano Fingering from a Physically Parameterized
+> Variational Framework with Inverse Parameter Recovery* (submitted,
+> *Journal of Mathematics and Music*).
+
+Repository: <https://github.com/jpsmith8488/valhala-fingering-solver>
 
 ## Contents
 
-| File | Lines | Description |
-|------|-------|-------------|
-| `valhala_solver_standalone.py` | 1,493 | Complete 14-term equation-of-state solver |
-| `run_demonstrations.py` | 568 | Generates all 8 paper figures |
-| `README.md` | --- | This file |
-| `LICENSE` | --- | MIT license |
-| `requirements.txt` | --- | Python dependencies |
+| File | Description |
+|------|-------------|
+| `valhala_solver_standalone.py` | Complete 14-term equation-of-state solver |
+| `run_demonstrations.py` | Regenerates all paper figures |
+| `validation_battery.py` | Mechanism-isolation validation suite (Table 3) |
+| `reproduce_paper.py` | End-to-end check of every headline quantity |
+| `verify_figures_tables.py` | Exact figure- and table-value correspondence check |
+| `frozen_values.txt` | Reference values used in the manuscript |
+| `requirements.txt` | Python dependencies |
+| `LICENSE` | MIT license |
+
+(The `scale/` directory belongs to the separate SCALE project; see the
+note at the top of this file.)
 
 ## Requirements
 
 - Python 3.9 or later
 - NumPy >= 1.20
-- Matplotlib >= 3.5 (for figure generation only; the solver itself requires only NumPy)
-
-## Installation
+- Matplotlib >= 3.5 (figure generation only; the solver needs only NumPy)
 
 ```bash
-pip install numpy matplotlib
+pip install -r requirements.txt
 ```
 
-## Quick Start
+## Quick start
 
 ```python
-from valhala_solver_standalone import HamiltonianSolver
+from valhala_solver_standalone import HamiltonianSolver, SolverConfig
+import run_demonstrations as rd
 
-# Solve a C major scale (MIDI pitches) with Modern tradition
-solver = HamiltonianSolver(tradition='modern')
-result = solver.solve([60, 62, 64, 65, 67, 69, 71, 72])
-print(result['fingers'])  # [1, 2, 3, 1, 2, 3, 4, 5]
-print(result['cost'])     # Total action (dimensionless)
+# C major scale, Modern tradition
+solver = HamiltonianSolver(config=SolverConfig(tradition='modern', tempo_nps=4.0))
+result = solver.solve(rd.make_notes([60, 62, 64, 65, 67, 69, 71, 72], 4.0))
+print([int(f) for f in result.fingers])  # [1, 2, 3, 1, 2, 3, 4, 5]
+print(result.total_cost)                 # total action (dimensionless)
 ```
 
-## Pedagogical Traditions
+## Reproducing the paper
 
-Eight documented traditions spanning five centuries of keyboard instruction:
+```bash
+python reproduce_paper.py       # checks every headline quantity; exits 0 on success
+python verify_figures_tables.py # checks every figure and table value
+python validation_battery.py    # reproduces the Table 3 verdicts
+python run_demonstrations.py    # regenerates the figures
+```
 
-| Tradition | Key Figure(s) | Period |
-|-----------|--------------|--------|
-| `baroque` | Diruta, Santa Maria | 1565--1750 |
-| `classical` | C.P.E. Bach, Czerny | 1753--1850 |
-| `romantic` | Leschetizky, Liszt | 1850--1920 |
-| `modern` | Neuhaus, contemporary | 1920--present |
-| `russian` | Igumnov, Goldenweiser | 1900--present |
-| `french` | Cortot, Long | 1900--1960 |
-| `taubman` | Taubman | 1960--present |
-| `chopin` | Chopin (reconstructed) | 1830--1849 |
+`reproduce_paper.py` runs each reported result through the solver and
+compares it to the value stated in the manuscript: the emergent scale
+fingerings, the Chopin Op. 10/1 edition agreement across three hand
+sizes, the hand-size Action-Risk Index peaks, the dry/moist environment
+costs, the eight scaling exponents, and the Baroque--Modern crossover.
 
 ## Solver API
 
-### `HamiltonianSolver(tradition, hand_length, hand_breadth, ...)`
+`HamiltonianSolver(config=SolverConfig(...))` with fields including
+`tradition`, `hand_length`, `max_span`, `mu_f`, `tempo_nps`, and
+`arm_weight_selection`. `solver.solve(notes)` returns a `SolverResult`
+with `.fingers`, `.total_cost`, `.cost_breakdown`, and `.ari_values`.
 
-Main solver class. Key parameters:
+### Pedagogical traditions
 
-- `tradition` (str): Pedagogical tradition name (default: `'modern'`)
-- `hand_length` (float): Hand length in mm (default: 190.0)
-- `hand_breadth` (float): Hand breadth in mm (default: 85.0)
-- `mu_f` (float): Coulomb friction coefficient (default: 0.5)
-- `tempo_nps` (float): Notes per second (default: 6.0)
-- `technique` (str): `'preload'` or `'impact'` (default: `'preload'`)
+`baroque`, `classical`, `romantic`, `modern`, `russian`, `french`,
+`taubman`, `chopin` --- eight documented schools spanning five centuries
+of keyboard instruction, encoded as cost-function coefficient vectors.
 
-### `solver.solve(midi_or_notes)`
+### Embedded test passages
 
-Returns a dict with keys:
-- `fingers`: List of finger numbers (1=thumb, 5=little)
-- `cost`: Total action (dimensionless)
-- `cost_breakdown`: Dict mapping equation-of-state terms to their contributions
-- `per_note_cost`: Per-note transition costs
-- `ari_values`: Action-Risk Index values (4-note rolling window)
-- `ari_risk_levels`: Risk classification per note
-- `tradition`: Name of the pedagogical tradition used
+`passage_bach_invention_13()`, `passage_chopin_op10_1()`,
+`passage_bach_wtc_fugue()`, `passage_c_major_scale()`,
+`passage_chopin_op25_6()`.
 
-### Embedded Test Passages
+## Finger numbering
 
-- `passage_bach_invention_13()`: Bach Invention No. 13 in A minor, mm. 1--4
-- `passage_chopin_op10_1()`: Chopin Etude Op. 10 No. 1, mm. 1--2
-- `passage_bach_wtc_fugue()`: Bach WTC I, C major Fugue, subject
-- `passage_c_major_scale()`: Two-octave C major ascending scale
-- `passage_chopin_op25_6()`: Chopin Etude Op. 25 No. 6, mm. 1--2
+1 = thumb, 5 = little finger, for both hands.
 
-### Generate all paper figures
+## Reproducibility note
 
-```bash
-python run_demonstrations.py
-# Produces 8 PDF figures at 600 DPI in the working directory
+The solver is deterministic. The file `valhala_solver_standalone.py` is
+the frozen solver against which every number in the manuscript was
+computed; the demonstration and validation scripts import it unchanged.
+
+## Citation
+
+```bibtex
+@article{smith2026valhala,
+  author  = {Smith, Justin P.},
+  title   = {Optimal Piano Fingering from a Physically Parameterized
+             Variational Framework with Inverse Parameter Recovery},
+  journal = {Journal of Mathematics and Music},
+  year    = {2026},
+  note    = {Submitted}
+}
 ```
-
-## Finger Numbering Convention
-
-Throughout: R1--R5 and L1--L5, where 1 = thumb and 5 = little finger.
 
 ## License
 
-MIT License. See `LICENSE` for details.
+MIT License. See `LICENSE`.
