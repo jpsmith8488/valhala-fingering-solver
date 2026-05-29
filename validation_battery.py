@@ -5,7 +5,7 @@ Imports the frozen solver (valhala_solver_standalone.py,
 MD5 846ce6aae16623c6ca4a551f86df869c) and reports, for each of ten
 mechanism-isolating tests: an expert PREDICTION (sourced from the cited
 pedagogical literature where one exists; "mechanism-derived" for the two
-novel terms and the optional arm-weight selection variant), the frozen
+new terms and the optional arm-weight selection variant), the frozen
 solver's actual fingering, an ABLATION (mechanism disabled), and a VERDICT.
 
 Verdicts:
@@ -111,14 +111,14 @@ def threshold_tests():
     for a in [0, 2, 5, 10, 20, 40, 80]:
         with module_scale(ALPHA_BLACK_KEY=a):
             sw.append((a, hamming(solve(P_STAGGER), base)))
-    o.append(("Black-key depth stagger (NOVEL, fingering-dependent)", "alpha_bk", 2.0, sw))
+    o.append(("Black-key depth stagger (mechanism-derived, fingering-dependent)", "alpha_bk", 2.0, sw))
     with module_scale(ALPHA_ROTATION=0.0):
         base = solve(P_ROTATION, tempo=12.0)
     sw = []
     for a in [0, 1.5, 5, 15, 40, 100]:
         with module_scale(ALPHA_ROTATION=a):
             sw.append((a, hamming(solve(P_ROTATION, tempo=12.0), base)))
-    o.append(("Forearm rotation (NOVEL, fingering-dependent)", "alpha_rot", 1.5, sw))
+    o.append(("Forearm rotation (mechanism-derived, fingering-dependent)", "alpha_rot", 1.5, sw))
     return o
 
 

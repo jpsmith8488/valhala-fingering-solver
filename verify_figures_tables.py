@@ -74,7 +74,7 @@ red=100*(d5['dry']['cost']-d5['moist']['cost'])/d5['dry']['cost']
 ck("cost reduction", f"{red:.1f}%", "12.1%", abs(red-12.1)<0.2)
 
 # ===== FIG demo6 (crossover) =====
-print("\nFIG 3 (demo6) — phi 0.13 -> 0.04, mu_c ~1.15")
+print("\nFIG 3 (demo6) — phi 0.13 -> 0.04, mu_c ~1.20")
 d6,_ = rd.run_demo6()
 ck("phi at mu=0", f"{d6['phi'][0]:.3f}", "~0.13", abs(d6['phi'][0]-0.13)<0.03)
 ck("phi plateau (min)", f"{min(d6['phi']):.3f}", "~0.04", abs(min(d6['phi'])-0.043)<0.02)

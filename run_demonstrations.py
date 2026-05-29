@@ -3,25 +3,34 @@
 Demonstration Figure Generator
 ============================================
 
-Generates all 8 publication-quality figures for the accompanying
-manuscript on variational piano fingering.
+Generates the seven figures that appear in the accompanying manuscript
+on variational piano fingering, plus two supplementary figures (D3 and
+F8) on request.
 
-Demonstrations:
+Manuscript figures (always produced):
     D1: Baroque vs. Modern tradition (Bach Invention 13)
     D2: Large vs. small hands (Chopin Op.10/1)
-    D3: Russian vs. French-Cortot (Bach WTC I Fugue)
     D4: Tempo dependence (C major scale)
     D5: Dry vs. moist finger pads (Chopin Op.25/6)
     D6: Baroque-Modern crossover (order parameter)
     F7: Scaling law S(f) ~ f^alpha (all 8 traditions)
+
+Supplementary (produced only with --include-extras):
+    D3: Russian vs. French-Cortot (Bach WTC I Fugue)
     F8: Stochastic robustness heatmap (Bach Inv. 13, Modern)
+
+Note: the seventh manuscript figure, the threshold figure illustrating
+the three conditional terms (Figure 1 in the paper), is produced by the
+companion script make_threshold_figure.py, which calls the frozen solver
+on a small synthetic battery.
 
 Usage:
     pip install numpy matplotlib
     python run_demonstrations.py
+    python run_demonstrations.py --include-extras   # also produces D3, F8
 
 Output:
-    8 PDF figures in the working directory.
+    6 PDF figures in the working directory (8 with --include-extras).
 
 License: MIT
 """
@@ -515,6 +524,16 @@ def fig_stochastic(data, midis):
 # =====================================================================
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Generate figures for the ValHaLA manuscript.")
+    parser.add_argument(
+        "--include-extras", action="store_true",
+        help="Also generate D3 (Russian vs French-Cortot) and F8 "
+             "(stochastic robustness); these are supplementary and do "
+             "not appear in the manuscript.")
+    args = parser.parse_args()
+
     print("=" * 65)
     print("ValHaLA v2.1 — Demonstration Figure Generator")
     print("14-term equation of state for piano fingering")
@@ -534,11 +553,12 @@ def main():
         print(f"    {l.capitalize():12s}: J={d2[l]['cost']:.1f}")
     fig_demo2(d2, m2)
 
-    print("\n  [D3] Russian vs. French-Cortot...")
-    d3, m3 = run_demo3()
-    for t in ['russian', 'french']:
-        print(f"    {TRADITIONS[t].name:12s}: J={d3[t]['cost']:.1f}")
-    fig_demo3(d3, m3)
+    if args.include_extras:
+        print("\n  [D3] Russian vs. French-Cortot (supplementary)...")
+        d3, m3 = run_demo3()
+        for t in ['russian', 'french']:
+            print(f"    {TRADITIONS[t].name:12s}: J={d3[t]['cost']:.1f}")
+        fig_demo3(d3, m3)
 
     print("\n  [D4] Tempo dependence...")
     d4, m4 = run_demo4()
@@ -563,9 +583,10 @@ def main():
     scaling = run_scaling_law()
     fig_scaling_law(scaling)
 
-    print("\n  [F8] Stochastic robustness...")
-    stoch, ms = run_stochastic()
-    fig_stochastic(stoch, ms)
+    if args.include_extras:
+        print("\n  [F8] Stochastic robustness (supplementary)...")
+        stoch, ms = run_stochastic()
+        fig_stochastic(stoch, ms)
 
     import glob
     figs = sorted(glob.glob('*.pdf'))

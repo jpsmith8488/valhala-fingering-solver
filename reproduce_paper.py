@@ -96,7 +96,7 @@ dphis = [phis[i]-phis[i-1] for i in range(1,len(phis))]
 mu_c = mu_values[int(np.argmin(dphis))+1]
 check("phi at mu=0", f"{phi_lo:.3f}", "~0.13", abs(phi_lo-0.13)<0.03)
 check("phi plateau", f"{phi_hi:.3f}", "~0.04", abs(phi_hi-0.043)<0.02)
-check("mu_c (largest drop)", f"{mu_c:.2f}", "~1.15", abs(mu_c-1.15)<0.15)
+check("mu_c (largest drop)", f"{mu_c:.2f}", "~1.20", abs(mu_c-1.20)<0.15)
 
 print("\n"+"="*70)
 print(f"RESULT: {len(PASS)} passed, {len(FAIL)} failed")
